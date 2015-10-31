@@ -1,4 +1,4 @@
-#! /bin/env python
+#! /usr/bin/env python
 # coding:utf-8
 """
 Finding duplicate files
@@ -18,12 +18,14 @@ import zlib
 # 1MB
 blocksize = 1024 ** 2
 
+
 def sizeof_fmt(num, suffix='B'):
-    for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
+    for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi']:
         if abs(num) < 1024.0:
             return "%3.1f%s%s" % (num, unit, suffix)
         num /= 1024.0
     return "%.1f%s%s" % (num, 'Yi', suffix)
+
 
 def sha1_file(path):
     """
@@ -80,10 +82,13 @@ import time
 start_time = time.time()
 stats = {
     'total': 0,
+    'process': 0,
+    'process_total': 0,
     'total_size': 0,
     'same_size': 0,
     'empty': 0,
     'crc': 0,
+    'count_sha1': 0,
     'sha1': 0,
     'time': 0,
 }
@@ -111,7 +116,7 @@ def find_files(folders):
                 print
 
             for sha1, files3 in find_dup_sha1_files(files2):
-                print '===size:%5s,sha1:%11s==' % (sizeof_fmt(size),sha1)
+                print '===size:%5s,sha1:%11s==' % (sizeof_fmt(size), sha1)
                 for f in files3:
                     print '  %s' % f
                 print
@@ -119,10 +124,38 @@ def find_files(folders):
             print
 
 
+def show_files(c):
+    sys.stderr.write('\rfind file:%s' % c)
+    sys.stderr.flush()
+
+
+def get_progress(total, p1):
+    col = 40
+    len1 = col * p1 / total
+    len2 = col - col * p1 / total
+    s = '%2d%%' % (100 * p1 / total)
+    pass_time = time.time() - start_time
+    v = pass_time / (1.0 * p1 / total)
+    need_time = '剩余:%.1fs,消耗:%.1fs' % ( v * (1.0 - 1.0 * p1 / total), pass_time)
+    return '\r%s%s[%s]time:[%s]' % ( '>' * len1, '=' * len2, s, need_time)
+
+
+def show_process():
+    sys.stderr.write(get_progress(stats['process_total'], stats['process']))
+
+    # time.sleep(1)
+    sys.stderr.flush()
+
+
 def find_dup_sha1_files(files):
     sha1_files = {}
+
     for f in files:
         sha1 = sha1_file(f)
+        stats['count_sha1'] += 1
+
+        # sys.stderr.write('%.3f' % (1.0*stats['count_sha1'] / stats['crc'],))
+
         if not sha1 in sha1_files:
             sha1_files[sha1] = []
         sha1_files[sha1].append(f)
@@ -139,16 +172,19 @@ def find_dup_crc_files(files):
     sha1_files = {}
     for f in files:
         crc = crc32_file(f)
+        stats['process'] += 1
+        show_process()
         if not crc in sha1_files:
             sha1_files[crc] = []
         sha1_files[crc].append(f)
+        stats['crc'] += 1
 
     for crc, files2 in sha1_files.items():
         if debug_crc:
             print 'debug crc:', crc, 'len', len(files2), files2
         if len(files2) == 1:
             continue
-        stats['crc'] += len(files2)
+
         yield crc, files2
 
 
@@ -179,9 +215,11 @@ def get_all_files(folders):
                 if size == 0:
                     empty_file.append(path)
                     stats['empty'] += 1
+
                     continue
 
                 yield size, path
+            show_files(stats['total'])
 
 
 def find_same_size_files(all_files):
@@ -203,8 +241,10 @@ def find_same_size_files(all_files):
         if len(files) == 1:
             continue
         stats['same_size'] += len(files)
+        stats['process_total'] += len(files)
         sort_size.append(size)
-    sorted(sort_size)
+
+    sorted(sort_size, reverse=True)
     for size in sort_size:
         yield size, size_map[size]
 

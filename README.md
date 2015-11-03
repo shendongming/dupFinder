@@ -7,14 +7,22 @@ dupFinder/dupFinder.py ./ > dup_files.txt
 vim dup_files.txt
 
 统计结果:
-{
- 'total_size_human': '8.9GiB',  #扫描文件夹总大小
- 'sha1': 6555, 
- 'total_size': 9503503998, 
- 'crc': 6555, 
- 'time': '4.347s',  #消耗时间
- 'total': 29138,
- 'empty': 74, #空文件数量
- 'same_size': 23678
- 
-}
+```
+    #stats:
+    # {
+    #  "total_size_human": "13.0GiB",
+    #  "process": 372220,
+    #  "del_size_human": "3.7GiB",
+    #  "total": 377472,
+    #  "count_sha1": 325029,
+    #  "sha1": 325029,
+    #  "process_total": 372220,
+    #  "total_size": 13923604736,
+    #  "del_size": 4017960903,
+    #  "crc": 372220,
+    #  "del": 277703,
+    #  "time": "229.031s",
+    #  "empty": 488,
+    #  "same_size": 372220
+    #}
+```

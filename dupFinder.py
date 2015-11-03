@@ -10,6 +10,7 @@ __author__ = 'sdm'
 import hashlib
 import sys
 import os
+import json
 from os.path import isfile
 from os.path import exists
 from os.path import getmtime
@@ -294,7 +295,8 @@ def main():
         stats['total_size_human'] = sizeof_fmt(stats['total_size'])
         stats['del_size_human'] = sizeof_fmt(stats['del_size'])
         print '#stats:'
-        print '#', stats
+
+        print '#', json.dumps(stats,indent=2).replace('\n','\n#')
     else:
         print('Usage: python dupFinder.py folder or python dupFinder.py folder1 folder2 folder3')
 

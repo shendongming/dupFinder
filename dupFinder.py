@@ -12,8 +12,37 @@ import sys
 import os
 from os.path import isfile
 from os.path import exists
+from os.path import getmtime
 import zlib
 # todo 多进程
+from multiprocessing import cpu_count
+from multiprocessing import Process, Queue
+import time
+
+#准备进行crc计算的队列
+crc_queue = Queue()
+sha1_queue = Queue()
+
+start_time = time.time()
+stats = {
+    'total': 0,
+    'del': 0,
+    'del_size': 0,
+    'process': 0,
+    'process_total': 0,
+    'total_size': 0,
+    'same_size': 0,
+    'empty': 0,
+    'crc': 0,
+    'count_sha1': 0,
+    'sha1': 0,
+    'time': 0,
+}
+
+debug_crc = False
+size_map = {}
+
+empty_file = []
 
 # 1MB
 blocksize = 1024 ** 2
@@ -77,48 +106,39 @@ def sample_hash_file(filename):
     return crc
 
 
-import time
-
-start_time = time.time()
-stats = {
-    'total': 0,
-    'process': 0,
-    'process_total': 0,
-    'total_size': 0,
-    'same_size': 0,
-    'empty': 0,
-    'crc': 0,
-    'count_sha1': 0,
-    'sha1': 0,
-    'time': 0,
-}
-
-debug_crc = False
-size_map = {}
-
-empty_file = []
 
 
 def find_files(folders):
-    all_files = get_all_files(folders)
+    all_files = list(get_all_files(folders))
+    print
+
     for size, files in find_same_size_files(all_files):
         # 先进行sha1 计算
 
         if debug_crc:
-            print 'dup crc files,size:', size, 'len:', len(files)
+            print '#dup crc files,size:', size, 'len:', len(files)
 
         for crc, files2 in find_dup_crc_files(files):
 
             if debug_crc:
-                print '===crc:%11s==' % crc
+                print '#===crc:%11s==' % crc
                 for f in files2:
-                    print '  %s' % f
+                    print '#  %s' % f
                 print
 
             for sha1, files3 in find_dup_sha1_files(files2):
-                print '===size:%5s,sha1:%11s==' % (sizeof_fmt(size), sha1)
-                for f in files3:
-                    print '  %s' % f
+                print '\n#===size:%5s,sha1:%11s==' % (sizeof_fmt(size), sha1)
+                # 保留第一个
+                flag = 0
+                for mtime, f in files3:
+                    print '#  %s,%s' % (mtime, f)
+                    if flag:
+                        print "rm '%s'" % (f,)
+                        stats['del'] += 1
+                        stats['del_size'] += size
+                    else:
+                        flag = 1
+
                 print
 
             print
@@ -129,7 +149,7 @@ def show_files(c):
     sys.stderr.flush()
 
 
-def get_progress(total, p1):
+def get_progress(total, p1, del_count):
     col = 40
     len1 = col * p1 / total
     len2 = col - col * p1 / total
@@ -137,14 +157,21 @@ def get_progress(total, p1):
     pass_time = time.time() - start_time
     v = pass_time / (1.0 * p1 / total)
     need_time = '剩余:%.1fs,消耗:%.1fs' % ( v * (1.0 - 1.0 * p1 / total), pass_time)
-    return '\r%s%s[%s]time:[%s]' % ( '>' * len1, '=' * len2, s, need_time)
+    return '\r%s%s[%s]time:[%s]del:%s' % ( '>' * len1, '=' * len2, s, need_time, del_count)
 
 
 def show_process():
-    sys.stderr.write(get_progress(stats['process_total'], stats['process']))
+    sys.stderr.write(get_progress(stats['process_total'], stats['process'], stats['del']))
 
     # time.sleep(1)
     sys.stderr.flush()
+
+
+def sort_mtime(a, b):
+    r = cmp(a[0], b[0])
+    if r == 0:
+        return -cmp(a[1], b[1])
+    return r
 
 
 def find_dup_sha1_files(files):
@@ -158,12 +185,14 @@ def find_dup_sha1_files(files):
 
         if not sha1 in sha1_files:
             sha1_files[sha1] = []
-        sha1_files[sha1].append(f)
+
+        sha1_files[sha1].append((int(getmtime(f)), f))
 
     for sha1, files2 in sha1_files.items():
         # print 'debug sha1:', sha1, 'len', len(files2), files2
         if len(files2) == 1:
             continue
+        files2 = sorted(files2, sort_mtime, reverse=True)
         stats['sha1'] += len(files2)
         yield sha1, files2
 
@@ -181,7 +210,7 @@ def find_dup_crc_files(files):
 
     for crc, files2 in sha1_files.items():
         if debug_crc:
-            print 'debug crc:', crc, 'len', len(files2), files2
+            print '#debug crc:', crc, 'len', len(files2), files2
         if len(files2) == 1:
             continue
 
@@ -235,6 +264,7 @@ def find_same_size_files(all_files):
         if not size in size_map:
             size_map[size] = []
         size_map[size].append(path)
+
     sort_size = []
     for size, files in size_map.items():
         # 文件大小唯一,没有相同的
@@ -244,24 +274,10 @@ def find_same_size_files(all_files):
         stats['process_total'] += len(files)
         sort_size.append(size)
 
-    sorted(sort_size, reverse=True)
+    sort_size = sorted(sort_size, reverse=True)
     for size in sort_size:
+        print '#size', size , len(size_map[size])
         yield size, size_map[size]
-
-
-def printResults(dict1):
-    results = list(filter(lambda x: len(x) > 1, dict1.values()))
-    if len(results) > 0:
-        print('Duplicates Found:')
-        print('The following files are identical. The name could differ, but the content is identical')
-        print('___________________')
-        for result in results:
-            for subresult in result:
-                print('\t\t%s' % subresult)
-            print('___________________')
-
-    else:
-        print('No duplicate files found.')
 
 
 def main():
@@ -270,14 +286,15 @@ def main():
         folders = sys.argv[1:]
 
         find_files(folders)
-        print 'empty file count:', len(empty_file)
+        print '#empty file count:', len(empty_file)
         for f in empty_file:
-            print "  %s" % f
+            print "rm  '%s'" % f
 
         stats['time'] = '%.3fs' % (time.time() - start_time)
         stats['total_size_human'] = sizeof_fmt(stats['total_size'])
-        print 'stats:'
-        print stats
+        stats['del_size_human'] = sizeof_fmt(stats['del_size'])
+        print '#stats:'
+        print '#', stats
     else:
         print('Usage: python dupFinder.py folder or python dupFinder.py folder1 folder2 folder3')
 
@@ -295,6 +312,10 @@ def test():
             print sha1_file(f)
             t4 = time()
             print 'crc:', t2 - t1, 'sha1:', t4 - t3
+
+
+def test2():
+    print cpu_count()
 
 
 if __name__ == '__main__':
